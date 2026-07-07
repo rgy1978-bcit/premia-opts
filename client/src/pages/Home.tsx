@@ -18,6 +18,7 @@ import {
   Target,
   AlertCircle,
 } from "lucide-react";
+import { DisclaimerBanner } from "@/components/DisclaimerBanner";
 
 export default function Home() {
   const { isAuthenticated } = useAuth();
@@ -523,18 +524,21 @@ export default function Home() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border py-12 mt-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                <TrendingUp className="h-5 w-5 text-white" />
+      <footer className="border-t border-border mt-20">
+        <DisclaimerBanner />
+        <div className="py-8">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+                  <TrendingUp className="h-5 w-5 text-white" />
+                </div>
+                <span className="font-bold">PremiaOpts</span>
               </div>
-              <span className="font-bold">PremiaOpts</span>
+              <p className="text-sm text-muted-foreground">
+                © 2026 PremiaOpts. All rights reserved.
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              © 2026 PremiaOpts. All rights reserved.
-            </p>
           </div>
         </div>
       </footer>

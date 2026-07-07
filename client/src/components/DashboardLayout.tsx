@@ -26,6 +26,7 @@ import { LayoutDashboard, LogOut, PanelLeft, TrendingUp, Target, Upload, Graduat
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
+import { DisclaimerBanner } from './DisclaimerBanner';
 import { Button } from "./ui/button";
 
 const menuItems = [
@@ -364,6 +365,7 @@ function DashboardLayoutContent({
           />
         </div>
         <main className="flex-1 p-4">{children}</main>
+        <DisclaimerBanner />
       </SidebarInset>
     </>
   );

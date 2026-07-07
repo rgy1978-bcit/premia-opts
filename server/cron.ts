@@ -30,13 +30,7 @@ import {
   clearTradeSuggestions,
   insertTradeSuggestion,
 } from "./db";
-
-const VALID_STRATEGIES = new Set([
-  "covered_call",
-  "cash_secured_put",
-  "bull_call_spread",
-  "bull_put_spread",
-]);
+import { VALID_STRATEGIES } from "@shared/strategies";
 
 async function refreshSuggestionsForUser(userId: number): Promise<{ saved: number }> {
   const [holdings, goals] = await Promise.all([
@@ -99,23 +93,38 @@ Use realistic current market estimates for strikes and premiums.
   const { callGemini } = await import("./services/gemini");
   const response = await callGemini(prompt);
 
-  const clean = response.replace(/```json|```/g, "").trim();
-  const parsed = JSON.parse(clean);
-  const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+  let suggestions: any[] = [];
+  try {
+    const clean = response.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(clean);
+    suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+  } catch (err) {
+    console.error(`[Cron] Failed to parse Gemini response for user ${userId}:`, err);
+    return { saved: 0 };
+  }
+
+  const validSuggestions = suggestions.filter(
+    (s: any) =>
+      s.ticker != null &&
+      s.strategy &&
+      s.strikePrice != null &&
+      s.premium != null &&
+      VALID_STRATEGIES.has(s.strategy)
+  );
+
+  if (validSuggestions.length === 0) return { saved: 0 };
 
   await clearTradeSuggestions(userId);
 
   let savedCount = 0;
-  for (const s of suggestions) {
-    if (s.ticker == null || !s.strategy || s.strikePrice == null || s.premium == null) continue;
-    if (!VALID_STRATEGIES.has(s.strategy)) continue;
+  for (const s of validSuggestions) {
     try {
       await insertTradeSuggestion(userId, {
         ticker: String(s.ticker).toUpperCase(),
         strategy: s.strategy,
         strikePrice: Math.round(Number(s.strikePrice) * 100),
         premium: Math.round(Number(s.premium) * 100),
-        daysToExpiration: Number(s.daysToExpiration) || 30,
+        daysToExpiration: s.daysToExpiration != null ? Number(s.daysToExpiration) : 30,
         delta: String(s.delta ?? "0.30"),
         annualizedYield: String(s.annualizedYield ?? "0"),
         probabilityOfProfit: String(s.probabilityOfProfit ?? "50"),
@@ -150,7 +159,8 @@ export function startDailyCron(): void {
     let succeeded = 0;
     let failed = 0;
 
-    for (const userId of userIds) {
+    for (let i = 0; i < userIds.length; i++) {
+      const userId = userIds[i];
       try {
         const { saved } = await refreshSuggestionsForUser(userId);
         console.log(`[Cron] User ${userId}: ${saved} suggestion(s) saved`);
@@ -162,7 +172,7 @@ export function startDailyCron(): void {
 
       // 2-second stagger between users to respect Gemini rate limits.
       // At this rate: 30 users = 60 seconds total — well within the cron window.
-      if (userIds.indexOf(userId) < userIds.length - 1) {
+      if (i < userIds.length - 1) {
         await new Promise((r) => setTimeout(r, 2000));
       }
     }

@@ -1,4 +1,5 @@
 import { COOKIE_NAME } from "@shared/const";
+import { VALID_STRATEGIES } from "@shared/strategies";
 import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -586,7 +587,7 @@ Use realistic current market estimates for strikes and premiums.
         await db.clearTradeSuggestions(ctx.user.id);
 
         let savedCount = 0;
-        const validStrategies = new Set(["covered_call", "cash_secured_put", "bull_call_spread", "bull_put_spread"]);
+        const validStrategies = VALID_STRATEGIES;
         for (const s of suggestions) {
           if (s.ticker == null || !s.strategy || s.strikePrice == null || s.premium == null) continue;
           if (!validStrategies.has(s.strategy)) continue;
