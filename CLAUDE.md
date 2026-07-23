@@ -10,7 +10,7 @@
 | Auth | Supabase Auth (Google/Microsoft OAuth) |
 | AI | Google Gemini (primary), local Black-Scholes fallback |
 | Market Data | Financial Modeling Prep API (primary), Yahoo Finance (fallback) |
-| Deploy | Railway — `dev` branch → staging, `main` branch → production |
+| Deploy | Vercel — `dev` branch → preview, `main` branch → production |
 
 ## Running Locally
 
@@ -101,7 +101,7 @@ const key = ENV.fmpApiKey;
 
 ## Branch Strategy
 
-- Feature work → `dev` branch (staging at Railway)
+- Feature work → `dev` branch (Vercel preview deployment)
 - `main` branch → production (auto-deploys on push)
 - Never push directly to `main` without testing on `dev` first
 

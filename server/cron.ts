@@ -140,47 +140,63 @@ Use realistic current market estimates for strikes and premiums.
   return { saved: savedCount };
 }
 
+/**
+ * Runs the full daily refresh once (all users, staggered 2s apart).
+ *
+ * Shared by two triggers:
+ *   - startDailyCron() below (node-cron, in-process) — used by traditional
+ *     persistent-server deploys (Railway, Fly, a VM).
+ *   - api/cron/daily-refresh.ts — used on Vercel, where there is no
+ *     persistent process to hold a node-cron schedule, so Vercel Cron
+ *     hits an HTTP endpoint on the same 6:30 AM Mon–Fri schedule instead.
+ */
+export async function runDailySuggestionRefresh(): Promise<{ succeeded: number; failed: number }> {
+  const startTime = Date.now();
+  console.log("[Cron] Starting daily suggestion refresh...");
+
+  let userIds: number[];
+  try {
+    userIds = await getUsersWithHoldingsAndGoals();
+  } catch (err) {
+    console.error("[Cron] Failed to fetch user list:", err);
+    return { succeeded: 0, failed: 0 };
+  }
+
+  console.log(`[Cron] Processing ${userIds.length} user(s)`);
+
+  let succeeded = 0;
+  let failed = 0;
+
+  for (let i = 0; i < userIds.length; i++) {
+    const userId = userIds[i];
+    try {
+      const { saved } = await refreshSuggestionsForUser(userId);
+      console.log(`[Cron] User ${userId}: ${saved} suggestion(s) saved`);
+      succeeded++;
+    } catch (err) {
+      console.error(`[Cron] User ${userId} failed:`, err);
+      failed++;
+    }
+
+    // 2-second stagger between users to respect Gemini rate limits.
+    // At this rate: 30 users = 60 seconds total — well within the cron window.
+    if (i < userIds.length - 1) {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(
+    `[Cron] Done in ${elapsed}s — ${succeeded} succeeded, ${failed} failed`
+  );
+
+  return { succeeded, failed };
+}
+
 export function startDailyCron(): void {
   // 6:30 AM UTC, Monday–Friday
-  cron.schedule("30 6 * * 1-5", async () => {
-    const startTime = Date.now();
-    console.log("[Cron] Starting daily suggestion refresh...");
-
-    let userIds: number[];
-    try {
-      userIds = await getUsersWithHoldingsAndGoals();
-    } catch (err) {
-      console.error("[Cron] Failed to fetch user list:", err);
-      return;
-    }
-
-    console.log(`[Cron] Processing ${userIds.length} user(s)`);
-
-    let succeeded = 0;
-    let failed = 0;
-
-    for (let i = 0; i < userIds.length; i++) {
-      const userId = userIds[i];
-      try {
-        const { saved } = await refreshSuggestionsForUser(userId);
-        console.log(`[Cron] User ${userId}: ${saved} suggestion(s) saved`);
-        succeeded++;
-      } catch (err) {
-        console.error(`[Cron] User ${userId} failed:`, err);
-        failed++;
-      }
-
-      // 2-second stagger between users to respect Gemini rate limits.
-      // At this rate: 30 users = 60 seconds total — well within the cron window.
-      if (i < userIds.length - 1) {
-        await new Promise((r) => setTimeout(r, 2000));
-      }
-    }
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(
-      `[Cron] Done in ${elapsed}s — ${succeeded} succeeded, ${failed} failed`
-    );
+  cron.schedule("30 6 * * 1-5", () => {
+    runDailySuggestionRefresh();
   });
 
   console.log("[Cron] Daily suggestion refresh scheduled (6:30 AM UTC, Mon–Fri)");
