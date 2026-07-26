@@ -176,7 +176,7 @@ async function alpacaQuote(symbol: string): Promise<StockQuote | null> {
     );
     const ask = response.data?.quote?.ap ?? 0;
     const bid = response.data?.quote?.bp ?? 0;
-    const price = ask || bid;
+    const price = ask > 0 ? ask : bid;
     if (!price) return null;
     return {
       symbol,
@@ -280,7 +280,7 @@ const OPTIONS_TTL = 60 * 30;  // 30 minutes
 export async function getStockQuote(symbol: string): Promise<StockQuote | null> {
   const key = `quote:${symbol}`;
   const cached = await cacheGet<StockQuote>(key);
-  if (cached) return cached;
+  if (cached) return { ...cached, lastUpdate: new Date(cached.lastUpdate) };
   const result = (await fmpQuote(symbol)) ?? (await polygonQuote(symbol)) ?? (await alpacaQuote(symbol)) ?? (await yahooQuote(symbol));
   if (result) await cacheSet(key, result, QUOTE_TTL);
   return result;
@@ -305,10 +305,14 @@ export async function getImpliedVolatility(symbol: string): Promise<number | nul
 export async function getMultipleQuotes(symbols: string[]): Promise<StockQuote[]> {
   if (symbols.length === 0) return [];
 
+  const normalized = symbols.map((s) => s.toUpperCase());
+
   // Check cache for each symbol first
-  const cached = await Promise.all(symbols.map((s) => cacheGet<StockQuote>(`quote:${s}`)));
-  const misses = symbols.filter((_, i) => cached[i] === null);
-  const hits = cached.filter((q): q is StockQuote => q !== null);
+  const cached = await Promise.all(normalized.map((s) => cacheGet<StockQuote>(`quote:${s}`)));
+  const misses = normalized.filter((_, i) => cached[i] === null);
+  const hits = cached
+    .filter((q): q is StockQuote => q !== null)
+    .map((q) => ({ ...q, lastUpdate: new Date(q.lastUpdate) }));
 
   if (misses.length === 0) return hits;
 

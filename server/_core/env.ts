@@ -24,4 +24,8 @@ export const ENV = {
   // Alpha Vantage — keys available but intentionally NOT used.
   // Alpha Vantage has no options chains, no IV, no Greeks — equity price
   // history only. FMP is the correct tool for an options income app.
+  // Vercel Cron — Vercel auto-sends "Authorization: Bearer $CRON_SECRET" on
+  // cron-triggered requests when this var is set; api/cron/daily-refresh.ts
+  // checks it to reject calls that don't come from Vercel's scheduler.
+  cronSecret: process.env.CRON_SECRET ?? "",
 };
