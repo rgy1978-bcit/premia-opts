@@ -187,6 +187,7 @@ export default function Home() {
                     <ArrowRight className="ml-2 h-5 w-5" />
                   </Button>
                   <Button
+                    onClick={() => document.getElementById("learn-more")?.scrollIntoView({ behavior: "smooth" })}
                     size="lg"
                     variant="outline"
                   >
@@ -244,7 +245,7 @@ export default function Home() {
       </section>
 
       {/* What You Need Section */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 border-t border-border">
+      <section id="learn-more" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 border-t border-border">
         <div className="text-center mb-16">
           <h2 className="text-4xl font-bold mb-4">What You Need to Get Started</h2>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
