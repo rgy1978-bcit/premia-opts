@@ -272,6 +272,12 @@ export async function getTradeSuggestions(userId: number): Promise<TradeSuggesti
     .orderBy(desc(tradeSuggestions.annualizedYield));
 }
 
+export async function clearTradeSuggestions(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(tradeSuggestions).where(eq(tradeSuggestions.userId, userId));
+}
+
 export async function insertTradeSuggestion(userId: number, suggestion: Omit<TradeSuggestions, "id" | "userId" | "createdAt">) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -397,6 +403,21 @@ export async function checkAndIncrementAiUsage(userId: number, dailyLimit: numbe
     .where(and(eq(aiUsage.userId, userId), eq(aiUsage.date, today)));
 
   return { allowed: true, callCount: current + 1, limit: dailyLimit };
+}
+
+/**
+ * Returns all userIds who have at least one portfolio holding AND investor
+ * goals configured. Used by the daily cron to know who to generate
+ * suggestions for.
+ */
+export async function getUsersWithHoldingsAndGoals(): Promise<number[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .selectDistinct({ userId: portfolioHoldings.userId })
+    .from(portfolioHoldings)
+    .innerJoin(investorGoals, eq(portfolioHoldings.userId, investorGoals.userId));
+  return rows.map((r) => r.userId);
 }
 
 export async function getAiUsageToday(userId: number): Promise<number> {

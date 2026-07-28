@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback, memo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -7,13 +7,21 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { ChevronRight, CheckCircle, Download, Upload, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, CheckCircle, Download, Upload, Plus, Trash2, ArrowLeft } from "lucide-react";
 import { useLocation } from "wouter";
 import Papa from "papaparse";
 
-type Step = "income" | "risk" | "strategies" | "capital" | "horizon" | "portfolio" | "review";
+type Step = "account" | "income" | "risk" | "strategies" | "capital" | "horizon" | "portfolio" | "review";
+
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  taxable: "Taxable Brokerage",
+  traditional_ira: "Traditional IRA",
+  roth_ira: "Roth IRA",
+  "401k": "401(k) / Employer Plan",
+};
 
 interface GoalFormData {
+  accountType: "taxable" | "traditional_ira" | "roth_ira" | "401k";
   monthlyIncomeGoal: number;
   riskTolerance: "conservative" | "balanced" | "aggressive";
   preferredStrategies: string[];
@@ -30,9 +38,51 @@ interface PortfolioHolding {
   sector?: string;
 }
 
+const STRATEGY_OPTIONS = [
+  { id: "covered_calls", label: "Covered Calls", desc: "Sell calls against shares you own" },
+  { id: "cash_secured_puts", label: "Cash Secured Puts", desc: "Sell puts backed by cash reserves" },
+  { id: "wheel", label: "Wheel Strategy", desc: "Combine puts and calls for continuous income" },
+];
+
+const StrategiesStep = memo(function StrategiesStep({
+  preferredStrategies,
+  toggleStrategy,
+}: {
+  preferredStrategies: string[];
+  toggleStrategy: (s: string) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold mb-2">Preferred Strategies</h2>
+        <p className="text-muted-foreground">Which options strategies interest you most?</p>
+      </div>
+      <div className="space-y-3">
+        {STRATEGY_OPTIONS.map((strategy) => (
+          <div
+            key={strategy.id}
+            className="flex items-center space-x-3 p-4 border border-border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+          >
+            <Checkbox
+              id={strategy.id}
+              checked={preferredStrategies.includes(strategy.id)}
+              onCheckedChange={() => toggleStrategy(strategy.id)}
+            />
+            <Label htmlFor={strategy.id} className="flex-1 cursor-pointer">
+              <span className="font-semibold">{strategy.label}</span>
+              <p className="text-sm text-muted-foreground">{strategy.desc}</p>
+            </Label>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
+
 export default function GoalSetup() {
-  const [step, setStep] = useState<Step>("income");
+  const [step, setStep] = useState<Step>("account");
   const [formData, setFormData] = useState<GoalFormData>({
+    accountType: "taxable",
     monthlyIncomeGoal: 1000,
     riskTolerance: "balanced",
     preferredStrategies: ["covered_calls"],
@@ -55,7 +105,7 @@ export default function GoalSetup() {
   const uploadHoldingsMutation = trpc.portfolio.uploadHoldings.useMutation();
   const [, setLocation] = useLocation();
 
-  const steps: Step[] = ["income", "risk", "strategies", "capital", "horizon", "portfolio", "review"];
+  const steps: Step[] = ["account", "income", "risk", "strategies", "capital", "horizon", "portfolio", "review"];
   const currentStepIndex = steps.indexOf(step);
   const progress = ((currentStepIndex + 1) / steps.length) * 100;
 
@@ -75,6 +125,7 @@ export default function GoalSetup() {
     try {
       // Save goals
       await setGoalsMutation.mutateAsync({
+        accountType: formData.accountType,
         monthlyIncomeGoal: formData.monthlyIncomeGoal,
         riskTolerance: formData.riskTolerance,
         preferredStrategies: JSON.stringify(formData.preferredStrategies),
@@ -97,14 +148,14 @@ export default function GoalSetup() {
     }
   };
 
-  const toggleStrategy = (strategy: string) => {
+  const toggleStrategy = useCallback((strategy: string) => {
     setFormData((prev) => ({
       ...prev,
       preferredStrategies: prev.preferredStrategies.includes(strategy)
         ? prev.preferredStrategies.filter((s) => s !== strategy)
         : [...prev.preferredStrategies, strategy],
     }));
-  };
+  }, []);
 
   const downloadTemplate = () => {
     const link = document.createElement("a");
@@ -186,6 +237,13 @@ export default function GoalSetup() {
       <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="mb-8">
+          <button
+            onClick={() => setLocation("/dashboard")}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Dashboard
+          </button>
           <h1 className="text-4xl font-bold gradient-text mb-2">PremiaOpts — Goal Setup</h1>
           <p className="text-muted-foreground">Configure your investment goals and preferences</p>
         </div>
@@ -208,6 +266,56 @@ export default function GoalSetup() {
 
         {/* Card Container */}
         <Card className="card-elegant mb-8">
+          {/* Account Type Step */}
+          {step === "account" && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-2xl font-bold mb-2">Account Type</h2>
+                <p className="text-muted-foreground">Where will you be trading options? This affects which strategies are available and how gains are taxed.</p>
+              </div>
+              <RadioGroup
+                value={formData.accountType}
+                onValueChange={(value: any) => setFormData((prev) => ({ ...prev, accountType: value }))}
+              >
+                <div className="space-y-3">
+                  {[
+                    {
+                      value: "taxable",
+                      label: "Taxable Brokerage",
+                      desc: "Standard account. All strategies available. Premiums taxed as short-term gains. Wash sale rules apply.",
+                    },
+                    {
+                      value: "traditional_ira",
+                      label: "Traditional IRA",
+                      desc: "Tax-deferred growth. Covered calls and cash-secured puts available. No wash sale rules. Withdrawal tax applies.",
+                    },
+                    {
+                      value: "roth_ira",
+                      label: "Roth IRA",
+                      desc: "Tax-free growth. Covered calls and cash-secured puts available. No wash sale rules. Best for long-term income.",
+                    },
+                    {
+                      value: "401k",
+                      label: "401(k) / Employer Plan",
+                      desc: "Very limited options access depending on your plan provider. Check with your plan administrator.",
+                    },
+                  ].map((option) => (
+                    <div
+                      key={option.value}
+                      className="flex items-center space-x-3 p-4 border border-border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                    >
+                      <RadioGroupItem value={option.value} id={option.value} />
+                      <Label htmlFor={option.value} className="flex-1 cursor-pointer">
+                        <span className="font-semibold">{option.label}</span>
+                        <p className="text-sm text-muted-foreground">{option.desc}</p>
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </RadioGroup>
+            </div>
+          )}
+
           {/* Income Goal Step */}
           {step === "income" && (
             <div className="space-y-6">
@@ -224,7 +332,8 @@ export default function GoalSetup() {
                   <Input
                     id="income"
                     type="number"
-                    value={formData.monthlyIncomeGoal}
+                    value={formData.monthlyIncomeGoal || ""}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) =>
                       setFormData((prev) => ({
                         ...prev,
@@ -294,38 +403,10 @@ export default function GoalSetup() {
 
           {/* Strategies Step */}
           {step === "strategies" && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-2xl font-bold mb-2">Preferred Strategies</h2>
-                <p className="text-muted-foreground">Which options strategies interest you most?</p>
-              </div>
-              <div className="space-y-3">
-                {[
-                  { id: "covered_calls", label: "Covered Calls", desc: "Sell calls against shares you own" },
-                  {
-                    id: "cash_secured_puts",
-                    label: "Cash Secured Puts",
-                    desc: "Sell puts backed by cash reserves",
-                  },
-                  { id: "wheel", label: "Wheel Strategy", desc: "Combine puts and calls for continuous income" },
-                ].map((strategy) => (
-                  <div
-                    key={strategy.id}
-                    className="flex items-center space-x-3 p-4 border border-border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
-                  >
-                    <Checkbox
-                      id={strategy.id}
-                      checked={formData.preferredStrategies.includes(strategy.id)}
-                      onCheckedChange={() => toggleStrategy(strategy.id)}
-                    />
-                    <Label htmlFor={strategy.id} className="flex-1 cursor-pointer">
-                      <span className="font-semibold">{strategy.label}</span>
-                      <p className="text-sm text-muted-foreground">{strategy.desc}</p>
-                    </Label>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <StrategiesStep
+              preferredStrategies={formData.preferredStrategies}
+              toggleStrategy={toggleStrategy}
+            />
           )}
 
           {/* Capital Exposure Step */}
@@ -346,7 +427,8 @@ export default function GoalSetup() {
                   <Input
                     id="capital"
                     type="number"
-                    value={formData.maxCapitalExposure}
+                    value={formData.maxCapitalExposure || ""}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) =>
                       setFormData((prev) => ({
                         ...prev,
@@ -680,6 +762,10 @@ export default function GoalSetup() {
               </div>
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-muted/50 rounded-lg">
+                    <p className="text-sm text-muted-foreground mb-1">Account Type</p>
+                    <p className="text-lg font-semibold">{ACCOUNT_TYPE_LABELS[formData.accountType]}</p>
+                  </div>
                   <div className="p-4 bg-muted/50 rounded-lg">
                     <p className="text-sm text-muted-foreground mb-1">Monthly Income Goal</p>
                     <p className="text-2xl font-bold text-primary">

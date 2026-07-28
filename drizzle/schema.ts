@@ -1,4 +1,4 @@
-import { integer, pgEnum, pgTable, text, timestamp, varchar, boolean, serial, numeric } from "drizzle-orm/pg-core";
+import { integer, pgEnum, pgTable, text, timestamp, varchar, boolean, serial, numeric, index } from "drizzle-orm/pg-core";
 
 export const roleEnum = pgEnum("role", ["user", "admin"]);
 export const riskToleranceEnum = pgEnum("riskTolerance", ["conservative", "balanced", "aggressive"]);
@@ -31,6 +31,7 @@ export const investorGoals = pgTable("investorGoals", {
   preferredStrategies: varchar("preferredStrategies", { length: 255 }).notNull(),
   maxCapitalExposure: integer("maxCapitalExposure").notNull(),
   timeHorizon: varchar("timeHorizon", { length: 64 }).notNull(),
+  accountType: varchar("accountType", { length: 32 }).default("taxable").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
@@ -158,3 +159,19 @@ export const aiUsage = pgTable("aiUsage", {
 
 export type AiUsage = typeof aiUsage.$inferSelect;
 export type InsertAiUsage = typeof aiUsage.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Market data cache — reduces FMP/Polygon API calls across all users
+// TTL is enforced at read time (expiresAt check). A cleanup job can prune
+// stale rows periodically, but leaving them does not cause correctness issues.
+// ---------------------------------------------------------------------------
+export const marketDataCache = pgTable("marketDataCache", {
+  cacheKey: varchar("cacheKey", { length: 128 }).primaryKey(),
+  data: text("data").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  fetchedAt: timestamp("fetchedAt").defaultNow().notNull(),
+}, (table) => [
+  index("marketDataCache_expiresAt_idx").on(table.expiresAt),
+]);
+
+export type MarketDataCache = typeof marketDataCache.$inferSelect;

@@ -1,11 +1,11 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import LearningOpportunities from "@/components/LearningOpportunities";
+import OptionPayoffChart from "@/components/OptionPayoffChart";
 import { useUserMode } from "@/hooks/useUserMode";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
-import { TrendingUp, Calendar, Target, DollarSign, Activity, Filter } from "lucide-react";
+import { TrendingUp, Calendar, Target, DollarSign, Activity, Filter, ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
 
 const strategyLabels: Record<string, string> = {
@@ -29,6 +29,7 @@ export default function Opportunities() {
   const [filterStrategy, setFilterStrategy] = useState<string>("all");
   const [minYield, setMinYield] = useState<number>(0);
   const [sortBy, setSortBy] = useState<"annualizedYield" | "premium" | "daysToExpiration">("annualizedYield");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const suggestionsQuery = trpc.trades.getSuggestions.useQuery();
   const decideM = trpc.trades.createDecision.useMutation({
     onSuccess: () => suggestionsQuery.refetch(),
@@ -150,103 +151,130 @@ export default function Opportunities() {
 
         {/* Opportunity Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(s => (
-            <Card key={s.id} className="p-5 hover:shadow-md transition-shadow">
-              {/* Card Header */}
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <span className="text-2xl font-bold text-gray-900">{s.ticker}</span>
-                  <div className="mt-1">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${strategyColors[s.strategy]}`}>
-                      {strategyLabels[s.strategy]}
-                    </span>
+          {filtered.map(s => {
+            const isExpanded = expandedId === s.id;
+            return (
+              <Card key={s.id} className="p-5 hover:shadow-md transition-shadow">
+                {/* Card Header */}
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <span className="text-2xl font-bold text-gray-900">{s.ticker}</span>
+                    <div className="mt-1">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${strategyColors[s.strategy]}`}>
+                        {strategyLabels[s.strategy]}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-green-700">{s.annualizedYield}%</div>
+                    <div className="text-xs text-muted-foreground">annualized</div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-green-700">{s.annualizedYield}%</div>
-                  <div className="text-xs text-muted-foreground">annualized</div>
-                </div>
-              </div>
 
-              {/* Metrics Grid */}
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="bg-gray-50 rounded-lg p-2.5">
-                  <div className="flex items-center gap-1 mb-1">
-                    <DollarSign className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Premium</span>
+                {/* Metrics Grid */}
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="bg-gray-50 rounded-lg p-2.5">
+                    <div className="flex items-center gap-1 mb-1">
+                      <DollarSign className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Premium</span>
+                    </div>
+                    <div className="font-semibold text-sm">${s.premium.toFixed(2)}</div>
                   </div>
-                  <div className="font-semibold text-sm">${s.premium.toFixed(2)}</div>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-2.5">
-                  <div className="flex items-center gap-1 mb-1">
-                    <Target className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Strike</span>
+                  <div className="bg-gray-50 rounded-lg p-2.5">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Target className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Strike</span>
+                    </div>
+                    <div className="font-semibold text-sm">${s.strikePrice.toFixed(2)}</div>
                   </div>
-                  <div className="font-semibold text-sm">${s.strikePrice.toFixed(2)}</div>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-2.5">
-                  <div className="flex items-center gap-1 mb-1">
-                    <Activity className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Delta</span>
+                  <div className="bg-gray-50 rounded-lg p-2.5">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Activity className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Delta</span>
+                    </div>
+                    <div className="font-semibold text-sm">{s.delta}</div>
                   </div>
-                  <div className="font-semibold text-sm">{s.delta}</div>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-2.5">
-                  <div className="flex items-center gap-1 mb-1">
-                    <Calendar className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">DTE</span>
+                  <div className="bg-gray-50 rounded-lg p-2.5">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Calendar className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">DTE</span>
+                    </div>
+                    <div className="font-semibold text-sm">{s.daysToExpiration}d</div>
                   </div>
-                  <div className="font-semibold text-sm">{s.daysToExpiration}d</div>
                 </div>
-              </div>
 
-              {/* Probability & Monthly Income */}
-              <div className="flex items-center justify-between mb-4 p-2.5 bg-green-50 rounded-lg">
-                <div>
-                  <div className="text-xs text-muted-foreground">Prob. of Profit</div>
-                  <div className="font-semibold text-green-700">{s.probabilityOfProfit}%</div>
+                {/* Probability & Monthly Income */}
+                <div className="flex items-center justify-between mb-4 p-2.5 bg-green-50 rounded-lg">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Prob. of Profit</div>
+                    <div className="font-semibold text-green-700">{s.probabilityOfProfit}%</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-muted-foreground">Monthly Income</div>
+                    <div className="font-semibold text-green-700">${s.potentialMonthlyIncome.toFixed(2)}</div>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-xs text-muted-foreground">Monthly Income</div>
-                  <div className="font-semibold text-green-700">${s.potentialMonthlyIncome.toFixed(2)}</div>
-                </div>
-              </div>
 
-              {/* Expiration */}
-              {s.expirationDate && (
-                <div className="text-xs text-muted-foreground mb-4">
-                  Expires: {new Date(s.expirationDate).toLocaleDateString()}
-                </div>
-              )}
+                {/* Expiration */}
+                {s.expirationDate && (
+                  <div className="text-xs text-muted-foreground mb-3">
+                    Expires: {new Date(s.expirationDate).toLocaleDateString()}
+                  </div>
+                )}
 
-              {/* Action Buttons */}
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  className="flex-1 bg-green-700 hover:bg-green-800 text-white text-xs"
-                  onClick={() => handleDecision(s.id, s.ticker, s.strategy, "accepted")}
+                {/* Greeks & Payoff toggle */}
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : s.id)}
+                  className="w-full flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground py-1.5 mb-3 border border-dashed border-gray-200 rounded-lg hover:border-gray-300 transition-colors"
                 >
-                  Accept
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="flex-1 text-xs"
-                  onClick={() => handleDecision(s.id, s.ticker, s.strategy, "under_consideration")}
-                >
-                  Consider
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="flex-1 text-xs text-red-600 border-red-200 hover:bg-red-50"
-                  onClick={() => handleDecision(s.id, s.ticker, s.strategy, "rejected")}
-                >
-                  Reject
-                </Button>
-              </div>
-            </Card>
-          ))}
+                  {isExpanded ? (
+                    <><ChevronUp className="h-3 w-3" /> Hide Greeks & Payoff</>
+                  ) : (
+                    <><ChevronDown className="h-3 w-3" /> Show Greeks & Payoff Diagram</>
+                  )}
+                </button>
+
+                {/* Expandable: Greeks + Payoff Chart */}
+                {isExpanded && (
+                  <OptionPayoffChart
+                    strategy={s.strategy}
+                    strikePrice={s.strikePrice}
+                    premium={s.premium}
+                    daysToExpiration={s.daysToExpiration}
+                    delta={s.delta}
+                    isLearning={false}
+                  />
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    className="flex-1 bg-green-700 hover:bg-green-800 text-white text-xs"
+                    onClick={() => handleDecision(s.id, s.ticker, s.strategy, "accepted")}
+                  >
+                    Accept
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-xs"
+                    onClick={() => handleDecision(s.id, s.ticker, s.strategy, "under_consideration")}
+                  >
+                    Consider
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-xs text-red-600 border-red-200 hover:bg-red-50"
+                    onClick={() => handleDecision(s.id, s.ticker, s.strategy, "rejected")}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              </Card>
+            );
+          })}
         </div>
       </div>
     </DashboardLayout>

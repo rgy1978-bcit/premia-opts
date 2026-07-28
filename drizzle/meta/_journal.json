@@ -22,6 +22,20 @@
       "when": 1780515673720,
       "tag": "0002_thick_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1750400000000,
+      "tag": "0003_account_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1751500000000,
+      "tag": "0004_market_data_cache",
+      "breakpoints": true
     }
   ]
 }

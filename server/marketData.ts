@@ -1,5 +1,6 @@
 import axios from "axios";
 import { ENV } from "./_core/env";
+import { cacheGet, cacheSet } from "./cache";
 
 const FMP_BASE = "https://financialmodelingprep.com/api";
 
@@ -113,7 +114,88 @@ async function fmpOptionsChain(symbol: string, expirationDate?: string): Promise
 }
 
 // ---------------------------------------------------------------------------
-// Yahoo Finance — fallback when FMP is unavailable or key missing
+// Polygon.io — second-tier fallback for stock quotes only.
+//
+// Free tier gives 15-minute delayed US stock data via REST. No options chains
+// on the free tier — that requires the paid Starter plan ($29/mo).
+//
+// Future upgrade path → Tradier ($10/mo):
+//   Tradier offers real-time quotes + FULL options chains with exchange-sourced
+//   Greeks for $10/month, cheaper than Polygon for options data. It also
+//   exposes an order execution API, which would let users place trades
+//   directly from PremiaOpts (a natural paid-tier feature). Tradier would
+//   replace FMP as the primary data source once revenue supports it.
+// ---------------------------------------------------------------------------
+
+async function polygonQuote(symbol: string): Promise<StockQuote | null> {
+  const key = ENV.polygonApiKey;
+  if (!key) return null;
+  try {
+    const response = await axios.get(
+      `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}`,
+      { params: { apiKey: key }, timeout: 6000 }
+    );
+    const t = response.data?.ticker;
+    if (!t) return null;
+    const price = t.day?.c ?? t.lastTrade?.p ?? t.prevDay?.c ?? 0;
+    return {
+      symbol,
+      price,
+      bid: price,
+      ask: price,
+      volume: t.day?.v ?? 0,
+      marketCap: "N/A",
+      pe: 0,
+      dividend: 0,
+      lastUpdate: new Date(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Alpaca Markets — third-tier fallback for stock quotes.
+//
+// Free (paper) accounts: 15-minute delayed US stock data.
+// Live brokerage accounts: real-time data automatically, no extra cost.
+// No options chains on any Alpaca tier — stock quote fallback only.
+//
+// Auth: Basic base64(key:secret) — not a query param like FMP/Polygon.
+// ---------------------------------------------------------------------------
+
+async function alpacaQuote(symbol: string): Promise<StockQuote | null> {
+  const key = ENV.alpacaApiKey;
+  const secret = ENV.alpacaApiSecret;
+  if (!key || !secret) return null;
+  try {
+    const token = Buffer.from(`${key}:${secret}`).toString("base64");
+    const response = await axios.get(
+      `https://data.alpaca.markets/v2/stocks/${symbol}/quotes/latest`,
+      { headers: { Authorization: `Basic ${token}` }, timeout: 6000 }
+    );
+    const ask = response.data?.quote?.ap ?? 0;
+    const bid = response.data?.quote?.bp ?? 0;
+    const price = ask > 0 ? ask : bid;
+    if (!price) return null;
+    return {
+      symbol,
+      price,
+      bid,
+      ask,
+      volume: 0,
+      marketCap: "N/A",
+      pe: 0,
+      dividend: 0,
+      lastUpdate: new Date(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Yahoo Finance — fourth-tier fallback when FMP, Polygon, and Alpaca are unavailable
 // ---------------------------------------------------------------------------
 
 async function yahooQuote(symbol: string): Promise<StockQuote | null> {
@@ -182,15 +264,35 @@ async function yahooOptionsChain(symbol: string, expirationDate?: string): Promi
 }
 
 // ---------------------------------------------------------------------------
-// Public API — FMP first, Yahoo Finance fallback
+// Public API — cached, with four-tier fallback: FMP → Polygon → Alpaca → Yahoo
+//
+// Cache TTLs (Supabase table — see server/cache.ts for Redis upgrade notes):
+//   Stock quotes:   15 minutes  (balances freshness vs. FMP quota pressure)
+//   Options chains: 30 minutes  (chains don't change tick-by-tick)
+//
+// During the daily cron (6:30 AM UTC), all users share the same cached
+// prices so 100 users holding AAPL → 1 FMP call, not 100.
 // ---------------------------------------------------------------------------
 
+const QUOTE_TTL = 60 * 15;    // 15 minutes
+const OPTIONS_TTL = 60 * 30;  // 30 minutes
+
 export async function getStockQuote(symbol: string): Promise<StockQuote | null> {
-  return (await fmpQuote(symbol)) ?? (await yahooQuote(symbol));
+  const key = `quote:${symbol}`;
+  const cached = await cacheGet<StockQuote>(key);
+  if (cached) return { ...cached, lastUpdate: new Date(cached.lastUpdate) };
+  const result = (await fmpQuote(symbol)) ?? (await polygonQuote(symbol)) ?? (await alpacaQuote(symbol)) ?? (await yahooQuote(symbol));
+  if (result) await cacheSet(key, result, QUOTE_TTL);
+  return result;
 }
 
 export async function getOptionsChain(symbol: string, expirationDate?: string): Promise<OptionChain | null> {
-  return (await fmpOptionsChain(symbol, expirationDate)) ?? (await yahooOptionsChain(symbol, expirationDate));
+  const key = `options:${symbol}:${expirationDate ?? "all"}`;
+  const cached = await cacheGet<OptionChain>(key);
+  if (cached) return { ...cached, lastUpdate: new Date(cached.lastUpdate) };
+  const result = (await fmpOptionsChain(symbol, expirationDate)) ?? (await yahooOptionsChain(symbol, expirationDate));
+  if (result) await cacheSet(key, result, OPTIONS_TTL);
+  return result;
 }
 
 export async function getImpliedVolatility(symbol: string): Promise<number | null> {
@@ -201,12 +303,26 @@ export async function getImpliedVolatility(symbol: string): Promise<number | nul
 }
 
 export async function getMultipleQuotes(symbols: string[]): Promise<StockQuote[]> {
-  // FMP supports comma-separated batch requests — much more efficient
+  if (symbols.length === 0) return [];
+
+  const normalized = symbols.map((s) => s.toUpperCase());
+
+  // Check cache for each symbol first
+  const cached = await Promise.all(normalized.map((s) => cacheGet<StockQuote>(`quote:${s}`)));
+  const misses = normalized.filter((_, i) => cached[i] === null);
+  const hits = cached
+    .filter((q): q is StockQuote => q !== null)
+    .map((q) => ({ ...q, lastUpdate: new Date(q.lastUpdate) }));
+
+  if (misses.length === 0) return hits;
+
+  // FMP batch endpoint for cache misses — one API call for N symbols
+  let fetched: StockQuote[] = [];
   const key = ENV.fmpApiKey;
-  if (key && symbols.length > 0) {
-    const data = await fmpGet<any[]>(`/v3/quote/${symbols.join(",")}`);
+  if (key) {
+    const data = await fmpGet<any[]>(`/v3/quote/${misses.join(",")}`);
     if (data && data.length > 0) {
-      return data.map((q: any) => ({
+      fetched = data.map((q: any) => ({
         symbol: q.symbol,
         price: q.price ?? 0,
         bid: q.price ?? 0,
@@ -219,9 +335,21 @@ export async function getMultipleQuotes(symbols: string[]): Promise<StockQuote[]
       }));
     }
   }
-  // Fallback: individual Yahoo calls
-  const quotes = await Promise.all(symbols.map((s) => yahooQuote(s)));
-  return quotes.filter((q): q is StockQuote => q !== null);
+
+  // Fallback: Polygon then Yahoo for any still-missing symbols
+  if (fetched.length < misses.length) {
+    const fetchedSymbols = new Set(fetched.map((q) => q.symbol));
+    const stillMissing = misses.filter((s) => !fetchedSymbols.has(s));
+    const fallback = await Promise.all(
+      stillMissing.map((s) => polygonQuote(s).then((q) => q ?? alpacaQuote(s)).then((q) => q ?? yahooQuote(s)))
+    );
+    fetched.push(...fallback.filter((q): q is StockQuote => q !== null));
+  }
+
+  // Write fetched results to cache
+  await Promise.all(fetched.map((q) => cacheSet(`quote:${q.symbol}`, q, QUOTE_TTL)));
+
+  return [...hits, ...fetched];
 }
 
 /**

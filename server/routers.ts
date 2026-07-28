@@ -1,4 +1,5 @@
 import { COOKIE_NAME } from "@shared/const";
+import { VALID_STRATEGIES } from "@shared/strategies";
 import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -47,6 +48,7 @@ export const appRouter = router({
           preferredStrategies: z.string(),
           maxCapitalExposure: z.number().positive(),
           timeHorizon: z.string(),
+          accountType: z.enum(["taxable", "traditional_ira", "roth_ira", "401k"]).optional().default("taxable"),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -440,7 +442,7 @@ You are an options income advisor. Suggest 6 stocks or ETFs ideal for options in
 
 User's existing holdings (avoid recommending these): ${existingTickers}
 User's risk tolerance: ${goals?.riskTolerance ?? "balanced"}
-User's monthly income goal: $${(goals?.monthlyIncomeGoal ?? 0) / 100}
+User's monthly income goal: $${goals?.monthlyIncomeGoal ?? 0}
 User's preferred strategies: ${goals?.preferredStrategies ?? "any"}
 
 Pick stocks that are great candidates for covered calls, cash-secured puts, or iron condors. Prioritize liquid, well-known names with active options markets.
@@ -524,20 +526,99 @@ Answer concisely in 2-3 sentences.
       const holdings = await db.getPortfolioHoldings(ctx.user.id);
       const goals = await db.getInvestorGoals(ctx.user.id);
 
+      const holdingsSummary = holdings.slice(0, 10).map(h => ({
+        ticker: h.ticker,
+        shares: h.shares,
+        currentPrice: h.currentPrice / 100,
+        averageCost: h.averageCost / 100,
+      }));
+
+      const accountType = goals?.accountType ?? "taxable";
+      const accountNotes =
+        accountType === "taxable"
+          ? "This is a taxable brokerage account. Wash sale rules apply. Premiums are taxed as short-term gains."
+          : accountType === "roth_ira"
+          ? "This is a Roth IRA. No wash sale rules. All gains are tax-free. Conservative strategies preferred."
+          : accountType === "traditional_ira"
+          ? "This is a Traditional IRA. No wash sale rules. Gains are tax-deferred. No margin/naked options allowed."
+          : "This is a 401(k). Very limited options strategies. Only covered calls if the plan allows.";
+
+
       const prompt = `
-Analyze this options portfolio and suggest 3 income-generating trades.
-Holdings: ${JSON.stringify(holdings.slice(0, 10))}
-Monthly income goal: $${(goals?.monthlyIncomeGoal ?? 0) / 100}
-Return JSON: { "summary": "...", "suggestions": [{ "ticker": "...", "strategy": "...", "reasoning": "..." }] }
+You are an options income advisor. Analyze these stock holdings and suggest 3-5 income-generating options trades.
+
+Holdings: ${JSON.stringify(holdingsSummary)}
+Monthly income goal: $${goals?.monthlyIncomeGoal ?? 0}
+Risk tolerance: ${goals?.riskTolerance ?? "balanced"}
+Account type: ${accountType} — ${accountNotes}
+
+Return ONLY valid JSON (no markdown, no explanation):
+{
+  "summary": "One paragraph summary of the strategy",
+  "suggestions": [
+    {
+      "ticker": "AAPL",
+      "strategy": "covered_call",
+      "strikePrice": 195.00,
+      "premium": 3.50,
+      "daysToExpiration": 30,
+      "delta": "0.30",
+      "annualizedYield": "22.5",
+      "probabilityOfProfit": "70",
+      "potentialMonthlyIncome": 350.00,
+      "expirationDate": "2024-02-16",
+      "reasoning": "Brief explanation"
+    }
+  ]
+}
+
+strategy must be one of: covered_call, cash_secured_put, bull_call_spread, bull_put_spread
+Only suggest covered_call for tickers the user actually holds (at least 100 shares).
+Use realistic current market estimates for strikes and premiums.
       `.trim();
 
       const response = await callGemini(prompt);
       try {
         const clean = response.replace(/```json|```/g, "").trim();
         const parsed = JSON.parse(clean);
-        return { ...parsed, callsUsed: usage.callCount, callsRemaining: usage.limit - usage.callCount };
+        const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+
+        // Replace any previous suggestions for this user with the fresh batch
+        await db.clearTradeSuggestions(ctx.user.id);
+
+        let savedCount = 0;
+        const validStrategies = VALID_STRATEGIES;
+        for (const s of suggestions) {
+          if (s.ticker == null || !s.strategy || s.strikePrice == null || s.premium == null) continue;
+          if (!validStrategies.has(s.strategy)) continue;
+          try {
+            await db.insertTradeSuggestion(ctx.user.id, {
+              ticker: String(s.ticker).toUpperCase(),
+              strategy: s.strategy,
+              strikePrice: Math.round(Number(s.strikePrice) * 100),
+              premium: Math.round(Number(s.premium) * 100),
+              daysToExpiration: Number(s.daysToExpiration) || 30,
+              delta: String(s.delta ?? "0.30"),
+              annualizedYield: String(s.annualizedYield ?? "0"),
+              probabilityOfProfit: String(s.probabilityOfProfit ?? "50"),
+              potentialMonthlyIncome: Math.round(Number(s.potentialMonthlyIncome) * 100),
+              expirationDate: s.expirationDate ? new Date(s.expirationDate) : null,
+            });
+            savedCount++;
+          } catch (e) {
+            console.error("Failed to save suggestion:", e);
+          }
+        }
+
+        return {
+          summary: parsed.summary ?? "",
+          suggestions,
+          savedCount: savedCount,
+          callsUsed: usage.callCount,
+          callsRemaining: usage.limit - usage.callCount,
+        };
       } catch {
-        return { summary: response, suggestions: [], callsUsed: usage.callCount, callsRemaining: usage.limit - usage.callCount };
+        return { summary: response, suggestions: [], savedCount: 0, callsUsed: usage.callCount, callsRemaining: usage.limit - usage.callCount };
       }
     }),
   }),

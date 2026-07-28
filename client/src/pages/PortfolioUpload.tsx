@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -6,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Upload, FileText, CheckCircle, AlertCircle } from "lucide-react";
+import { Upload, FileText, CheckCircle, AlertCircle, ArrowLeft } from "lucide-react";
+import { useLocation } from "wouter";
 import Papa from "papaparse";
 
 interface ParsedHolding {
@@ -22,6 +24,7 @@ export default function PortfolioUpload() {
   const [parsedData, setParsedData] = useState<ParsedHolding[]>([]);
   const [fileName, setFileName] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
+  const [, setLocation] = useLocation();
 
   const uploadMutation = trpc.portfolio.uploadHoldings.useMutation();
 
@@ -92,10 +95,17 @@ export default function PortfolioUpload() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted p-6">
-      <div className="max-w-6xl mx-auto">
+    <DashboardLayout>
+    <div className="p-6 max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8">
+          <button
+            onClick={() => setLocation("/dashboard")}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Dashboard
+          </button>
           <h1 className="text-4xl font-bold gradient-text mb-2">Upload Portfolio</h1>
           <p className="text-muted-foreground">Import your current holdings from a CSV file</p>
         </div>
@@ -251,6 +261,6 @@ export default function PortfolioUpload() {
           </div>
         </div>
       </div>
-    </div>
+    </DashboardLayout>
   );
 }

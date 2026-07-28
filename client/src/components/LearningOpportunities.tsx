@@ -2,6 +2,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
+import { useState } from "react";
+import OptionPayoffChart from "@/components/OptionPayoffChart";
 import {
   TrendingUp,
   DollarSign,
@@ -11,6 +13,8 @@ import {
   BookOpen,
   Lightbulb,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 const STRATEGY_PLAIN: Record<string, { label: string; tutorialPage: string; plain: (ticker: string, strike: number, premium: number) => string }> = {
@@ -64,6 +68,7 @@ function StrategyExplainer() {
 
 export default function LearningOpportunities() {
   const [, setLocation] = useLocation();
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const suggestionsQuery = trpc.trades.getSuggestions.useQuery();
   const suggestions = suggestionsQuery.data || [];
 
@@ -160,6 +165,29 @@ export default function LearningOpportunities() {
                     <p className="font-bold text-foreground">{s.probabilityOfProfit}%</p>
                   </div>
                 </div>
+
+                {/* Payoff chart toggle */}
+                <button
+                  onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
+                  className="w-full flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground py-1.5 border border-dashed border-border rounded-lg hover:border-primary/40 transition-colors"
+                >
+                  {expandedId === s.id ? (
+                    <><ChevronUp className="h-3 w-3" /> Hide payoff diagram</>
+                  ) : (
+                    <><ChevronDown className="h-3 w-3" /> Show payoff diagram & Greeks</>
+                  )}
+                </button>
+
+                {expandedId === s.id && (
+                  <OptionPayoffChart
+                    strategy={s.strategy}
+                    strikePrice={s.strikePrice}
+                    premium={s.premium}
+                    daysToExpiration={s.daysToExpiration}
+                    delta={s.delta}
+                    isLearning={true}
+                  />
+                )}
 
                 {/* CTA */}
                 <div className="flex items-center justify-between pt-1 border-t border-border">

@@ -1,0 +1,14 @@
+{
+  "buildCommand": "vite build",
+  "outputDirectory": "dist/public",
+  "functions": {
+    "api/[...path].ts": { "maxDuration": 60 },
+    "api/cron/daily-refresh.ts": { "maxDuration": 60 }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/" }
+  ],
+  "crons": [
+    { "path": "/api/cron/daily-refresh", "schedule": "30 6 * * 1-5" }
+  ]
+}

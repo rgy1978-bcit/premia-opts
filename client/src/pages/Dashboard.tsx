@@ -1,13 +1,14 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import LearningDashboard from "@/components/LearningDashboard";
 import { useUserMode } from "@/hooks/useUserMode";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { trpc } from "@/lib/trpc";
-import { TrendingUp, Target, AlertCircle, DollarSign, Activity, CheckCircle, Upload, ArrowRight } from "lucide-react";
+import { TrendingUp, Target, AlertCircle, DollarSign, Activity, CheckCircle, Upload, ArrowRight, Sparkles, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { LineChart, Line, BarChart, Bar, PieChart as RechartsChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 export default function Dashboard() {
@@ -23,7 +24,21 @@ export default function Dashboard() {
   const taxHarvestQuery = trpc.analysis.getTaxHarvest.useQuery();
   const suggestionsQuery = trpc.trades.getSuggestions.useQuery();
   const decisionsQuery = trpc.trades.getDecisions.useQuery();
+  const analyzeAiM = trpc.ai.analyzeWithAi.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Generated ${data.savedCount} trade suggestions`);
+      suggestionsQuery.refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
   const analyticsQuery = trpc.analytics.getDailyAnalytics.useQuery({ days: 30 });
+
+  // Redirect new users to setup wizard once goals query resolves with no data
+  useEffect(() => {
+    if (!goalsQuery.isLoading && goalsQuery.data === null) {
+      setLocation("/setup");
+    }
+  }, [goalsQuery.isLoading, goalsQuery.data]);
 
   if (isLearning) {
     return (
@@ -48,8 +63,8 @@ export default function Dashboard() {
   const monthlyGoal = goals?.monthlyIncomeGoal ?? 0;
   const availableCash = capital?.availableCash ?? 0;
 
-  // Mock estimated monthly income (in production, calculate from open positions)
-  const estimatedMonthlyIncome = (suggestions || []).reduce((sum, s) => sum + (s?.potentialMonthlyIncome ?? 0), 0) / 100;
+  // getSuggestions already returns potentialMonthlyIncome in dollars
+  const estimatedMonthlyIncome = (suggestions || []).reduce((sum, s) => sum + (s?.potentialMonthlyIncome ?? 0), 0);
   const progressPercent = monthlyGoal > 0 ? (estimatedMonthlyIncome / monthlyGoal) * 100 : 0;
 
   // Prepare chart data
@@ -113,7 +128,11 @@ export default function Dashboard() {
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Monthly Income</p>
-                <p className="text-3xl font-bold text-accent">${estimatedMonthlyIncome.toLocaleString("en-US", { maximumFractionDigits: 0 })}</p>
+                {suggestionsQuery.isLoading ? (
+                  <Loader2 className="h-7 w-7 animate-spin text-accent/50 my-1" />
+                ) : (
+                  <p className="text-3xl font-bold text-accent">${estimatedMonthlyIncome.toLocaleString("en-US", { maximumFractionDigits: 0 })}</p>
+                )}
                 <p className="text-sm text-muted-foreground mt-2">From open positions</p>
               </div>
               <TrendingUp className="h-8 w-8 text-accent/30" />
@@ -140,7 +159,12 @@ export default function Dashboard() {
                 <h2 className="text-xl font-bold mb-1">Monthly Income Goal</h2>
                 <p className="text-muted-foreground">Progress toward your target</p>
               </div>
-              <Target className="h-6 w-6 text-primary/30" />
+              <button
+                onClick={() => setLocation("/setup")}
+                className="flex items-center gap-1 text-xs text-primary/70 hover:text-primary transition-colors"
+              >
+                Edit Goals <ArrowRight className="h-3 w-3" />
+              </button>
             </div>
             <div className="space-y-2">
               <div className="flex justify-between">
@@ -373,7 +397,12 @@ export default function Dashboard() {
           <div className="space-y-4">
             <Card className="card-elegant">
               <h3 className="text-lg font-bold mb-4">Trade Suggestions ({suggestions.length})</h3>
-              {suggestions.length > 0 ? (
+              {suggestionsQuery.isLoading || holdingsQuery.isLoading ? (
+                <div className="flex flex-col items-center gap-2 py-8 text-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Loading...</p>
+                </div>
+              ) : suggestions.length > 0 ? (
                 <div className="space-y-3">
                   {suggestions.slice(0, 5).map((s) => (
                     <div key={s.id} className="p-3 border border-border rounded-lg hover:bg-muted/50 transition-colors">
@@ -392,10 +421,23 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-3 py-8 text-center">
-                  <p className="text-sm text-muted-foreground">No trade suggestions yet — upload your portfolio first to get AI-generated ideas</p>
-                  <Button size="sm" variant="outline" onClick={() => setLocation("/upload")}>
-                    <Upload className="mr-1.5 h-3.5 w-3.5" /> Upload Portfolio
-                  </Button>
+                  <p className="text-sm text-muted-foreground">No trade suggestions yet</p>
+                  {holdings.length === 0 ? (
+                    <Button size="sm" variant="outline" onClick={() => setLocation("/upload")}>
+                      <Upload className="mr-1.5 h-3.5 w-3.5" /> Upload Portfolio First
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      className="bg-green-700 hover:bg-green-800 text-white"
+                      onClick={() => analyzeAiM.mutate()}
+                      disabled={analyzeAiM.isPending}
+                    >
+                      {analyzeAiM.isPending
+                        ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Generating...</>
+                        : <><Sparkles className="mr-1.5 h-3.5 w-3.5" /> Generate AI Suggestions</>}
+                    </Button>
+                  )}
                 </div>
               )}
             </Card>
